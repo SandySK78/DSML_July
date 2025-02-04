@@ -1,0 +1,182 @@
+If you have an Excel file with two sheets:
+
+
+1. "CAM" Sheet (Raw data)
+
+
+
+
+2. "Pivot" Sheet (Pivot table based on "CAM" data)
+
+
+
+
+
+
+You want to replace the "CAM" sheet with updated data while ensuring the Pivot table refreshes automatically using a Python script.
+
+
+
+
+---
+
+
+Solution
+
+
+You can achieve this using Python (Pandas) + openpyxl for data replacement and VBA Macro (optional) for auto-refreshing the pivot table.
+
+
+
+
+---
+
+
+Step 1: Replace "CAM" Sheet Without Affecting Pivot Sheet
+
+
+import pandas as pd
+from openpyxl import load_workbook
+
+
+# Load new data for CAM (Replace this with your updated data source)
+new_cam_data = pd.DataFrame({
+    'Date': ['2025-01-01', '2025-01-02'],
+    'Team': ['A', 'B'],
+    'Score': [10, 20]
+})
+
+
+# Load the existing Excel file
+file_path = "your_excel_file.xlsx"
+
+
+# Load the workbook
+wb = load_workbook(file_path)
+
+
+# Remove the existing "CAM" sheet if it exists
+if "CAM" in wb.sheetnames:
+    wb.remove(wb["CAM"])
+
+
+# Create a new "CAM" sheet
+ws = wb.create_sheet("CAM")
+
+
+# Write new data to "CAM" sheet
+for r_idx, row in enumerate(new_cam_data.itertuples(index=False), 1):
+    for c_idx, value in enumerate(row, 1):
+        ws.cell(row=r_idx + 1, column=c_idx, value=value)
+
+
+# Add column headers
+for c_idx, column_name in enumerate(new_cam_data.columns, 1):
+    ws.cell(row=1, column=c_idx, value=column_name)
+
+
+# Save the updated Excel file
+wb.save(file_path)
+
+
+print("CAM sheet replaced successfully!")
+
+
+
+
+---
+
+
+Step 2: Refresh Pivot Table Automatically
+
+
+Method 1: Manually Refresh in Excel
+
+
+Open the file → Go to the Pivot Table → Right-click → Click Refresh.
+
+
+
+
+Method 2: Use VBA Macro for Auto-Refresh
+
+
+To refresh the Pivot Table automatically, add this VBA script inside Excel's VBA Editor (ALT + F11):
+
+
+Sub RefreshPivotTables()
+    Dim ws As Worksheet
+    For Each ws In ThisWorkbook.Sheets
+        Dim pt As PivotTable
+        For Each pt In ws.PivotTables
+            pt.RefreshTable
+        Next pt
+    Next ws
+End Sub
+
+
+Run this after updating the "CAM" sheet.
+
+
+Method 3: Refresh Pivot via Python using win32com
+
+
+If you want to refresh the Pivot Table automatically from Python, use win32com.client:
+
+
+import win32com.client
+
+
+# Open Excel and refresh Pivot Table
+xlApp = win32com.client.Dispatch("Excel.Application")
+xlApp.Visible = True # Show Excel
+
+
+# Open Workbook
+wb = xlApp.Workbooks.Open(r"C:\path\to\your_excel_file.xlsx")
+
+
+# Refresh all pivot tables
+for sheet in wb.Sheets:
+    for pivot in sheet.PivotTables():
+        pivot.RefreshTable()
+
+
+# Save and close
+wb.Save()
+wb.Close()
+xlApp.Quit()
+
+
+print("Pivot Table refreshed successfully!")
+
+
+
+
+---
+
+
+Final Workflow
+
+
+1. Run the Python script to replace "CAM" sheet.
+
+
+
+
+2. Run VBA macro / Python script to refresh the Pivot Table.
+
+
+
+
+3. Check Excel Pivot Table to verify updates.
+
+
+
+
+
+
+Would you like help automating this further?
+
+
+
