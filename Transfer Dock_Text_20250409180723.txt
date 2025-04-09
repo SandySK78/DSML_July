@@ -1,0 +1,154 @@
+Great — if row numbers won't match, then you'll need to match rows based on the 9-column values themselves, i.e., find if each row in funddump has a matching row in fund (same values in all 9 columns). You’ll do this for all three pairs and store the results in three new dataframes.
+
+Here’s how you can handle it step-by-step:
+
+
+---
+
+Updated Logic:
+
+For each row in funddump:
+
+1. Check if any row in fund matches on all 9 specified columns.
+
+
+2. If matched, set fund_match = True.
+
+
+3. If not matched, set fund_match = False and identify which of the 9 columns differ from all rows in fund.
+
+
+
+Repeat the same for platdump/plat and aomdump/aom.
+
+
+---
+
+Updated Code:
+
+import pandas as pd
+
+def match_rows(dump_df, base_df, cols_to_compare, result_col_name):
+    dump_df = dump_df.copy()
+    base_subset = base_df[cols_to_compare].drop_duplicates()
+
+    match_flags = []
+    mismatch_details = []
+
+    for _, dump_row in dump_df.iterrows():
+        row_match = (base_subset == dump_row[cols_to_compare].values).all(axis=1)
+        if row_match.any():
+            match_flags.append(True)
+            mismatch_details.append('')
+        else:
+            mismatched = []
+            for col in cols_to_compare:
+                if not (dump_row[col] in base_df[col].values):
+                    mismatched.append(col)
+            mismatch_details.append(','.join(mismatched))
+            match_flags.append(False)
+
+    dump_df[result_col_name] = match_flags
+    dump_df[f"{result_col_name}_mismatch_cols"] = mismatch_details
+    return dump_df
+
+
+---
+
+Usage for Each Pair:
+
+# Example: columns to compare
+cols_to_compare = ['col1', 'col2', 'col3', 'col4', 'col5', 'col6', 'col7', 'col8', 'col9']
+
+# Create new matched dataframes
+funddump_matched = match_rows(funddump, fund, cols_to_compare, 'fund_match')
+platdump_matched = match_rows(platdump, plat, cols_to_compare, 'plat_match')
+aomdump_matched = match_rows(aomdump, aom, cols_to_compare, 'aom_match')
+
+
+---
+
+Result:
+
+Each resulting dataframe (*_matched) will have:
+
+A *_match column with True/False.
+
+A *_match_mismatch_cols column showing which of the 9 columns didn’t match if False.
+
+
+
+---
+
+Would you like to match on a unique key (like an ID) before comparing these 9 columns, or should it always try to match against any row in the reference dataframe as above?
+
+
+
+Perfect, that's already what the code is designed to do — but let me refine it to accurately identify the specific columns that don't match row-wise, comparing each dump_df row with all base_df rows, and then storing unmatched column names in a new column when there's no full match.
+
+Here’s the final updated code tailored to your case:
+
+
+---
+
+Function:
+
+import pandas as pd
+
+def match_rows_with_column_diff(dump_df, base_df, cols_to_compare, result_col_name):
+    dump_df = dump_df.copy()
+    base_df = base_df[cols_to_compare].drop_duplicates()
+
+    match_flags = []
+    mismatch_details = []
+
+    for _, dump_row in dump_df.iterrows():
+        # Check if the whole row exists in the base_df
+        matched_row = base_df[(base_df == dump_row[cols_to_compare].values).all(axis=1)]
+        
+        if not matched_row.empty:
+            match_flags.append(True)
+            mismatch_details.append('')
+        else:
+            # Compare with all rows in base_df to find the closest match
+            mismatched_cols = cols_to_compare.copy()
+            for _, base_row in base_df.iterrows():
+                temp_mismatch = [col for col in cols_to_compare if dump_row[col] != base_row[col]]
+                if len(temp_mismatch) < len(mismatched_cols):
+                    mismatched_cols = temp_mismatch
+                if len(mismatched_cols) == 0:
+                    break
+            match_flags.append(False)
+            mismatch_details.append(','.join(mismatched_cols))
+
+    dump_df[result_col_name] = match_flags
+    dump_df[f"{result_col_name}_mismatch_cols"] = mismatch_details
+    return dump_df
+
+
+---
+
+Usage:
+
+cols_to_compare = ['col1', 'col2', 'col3', 'col4', 'col5', 'col6', 'col7', 'col8', 'col9']
+
+funddump_result = match_rows_with_column_diff(funddump, fund, cols_to_compare, 'fund_match')
+platdump_result = match_rows_with_column_diff(platdump, plat, cols_to_compare, 'plat_match')
+aomdump_result = match_rows_with_column_diff(aomdump, aom, cols_to_compare, 'aom_match')
+
+
+---
+
+Output:
+
+Each result dataframe will now contain:
+
+fund_match, plat_match, aom_match — True/False if all 9 columns match with any row.
+
+*_match_mismatch_cols — comma-separated column names that didn’t match if False.
+
+
+
+---
+
+Let me know if you’d like to optimize for large datasets (e.g., use hashing or merge approaches).
