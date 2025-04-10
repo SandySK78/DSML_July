@@ -1,0 +1,65 @@
+def clean_general(val):
+    if pd.isna(val):
+        return np.nan
+    val = str(val).replace('\xa0', ' ').replace('\u200b', '').strip().lower()
+    return val
+
+def clean_name(val):
+    return clean_general(val)
+
+def clean_progress(val):
+    if pd.isna(val):
+        return np.nan
+    val = str(val).replace('%', '').replace('\xa0', ' ').replace('\u200b', '').strip().lower()
+    try:
+        return str(float(val))  # Normalize 88, 88.0, '88' to '88.0'
+    except:
+        return val
+def clean_dataframe(df, compare_columns):
+    df = df.copy()
+    for col in compare_columns:
+        if col.lower() == 'name':
+            df[col] = df[col].apply(clean_name)
+        elif col.lower() == 'progress':
+            df[col] = df[col].apply(clean_progress)
+        else:
+            df[col] = df[col].apply(clean_general)
+    return df
+
+def compare_rows_final(dump_df, ref_df, compare_columns):
+    dump_df_clean = clean_dataframe(dump_df, compare_columns)
+    ref_df_clean = clean_dataframe(ref_df, compare_columns)
+    dump_df_orig = dump_df.copy()
+    results = []
+
+    for i, dump_row in dump_df_clean[compare_columns].iterrows():
+        full_match_found = False
+        best_match_count = -1
+        best_mismatch_cols = []
+
+        for _, ref_row in ref_df_clean[compare_columns].iterrows():
+            matches = [
+                (dump_row[col] == ref_row[col]) or 
+                (pd.isna(dump_row[col]) and pd.isna(ref_row[col]))
+                for col in compare_columns
+            ]
+            match_count = sum(matches)
+
+            if match_count == len(compare_columns):
+                full_match_found = True
+                break
+            elif match_count > best_match_count:
+                best_match_count = match_count
+                best_mismatch_cols = [col for col, match in zip(compare_columns, matches) if not match]
+
+        if full_match_found:
+            results.append((True, []))
+        else:
+            results.append((False, best_mismatch_cols))
+
+    dump_df_orig['is_match'] = [r[0] for r in results]
+    dump_df_orig['mismatched_columns'] = [r[1] for r in results]
+    return dump_df_orig
+
+compare_columns = ['Name', 'Progress', 'col3', 'col4', 'col5', 'col6', 'col7', 'col8', 'col9']
+fund_result = compare_rows_final(funddump, fund, compare_columns)
