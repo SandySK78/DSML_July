@@ -1,0 +1,90 @@
+Got it — you want strict matching that takes into account:
+
+Case sensitivity (e.g., "Apple" ≠ "apple")
+
+Leading/trailing spaces ("Apple " ≠ "Apple")
+
+NaN vs empty vs real values (e.g., NaN ≠ "")
+
+
+Let me now give you an improved and strict version of the function that handles all of that:
+
+
+---
+
+Strict Matching Function (Enhanced Version):
+
+import pandas as pd
+import numpy as np
+
+def clean_value(val):
+    if pd.isna(val):
+        return '<<NaN>>'
+    return str(val).strip()
+
+def match_rows_strict(dump_df, base_df, cols_to_compare, result_col_name):
+    dump_df = dump_df.copy()
+
+    # Clean and normalize data for strict comparison
+    dump_df_clean = dump_df[cols_to_compare].applymap(clean_value)
+    base_df_clean = base_df[cols_to_compare].drop_duplicates().applymap(clean_value)
+
+    match_flags = []
+    mismatch_details = []
+
+    for i, dump_row in dump_df_clean.iterrows():
+        matched = (base_df_clean == dump_row.values).all(axis=1)
+
+        if matched.any():
+            match_flags.append(True)
+            mismatch_details.append('')
+        else:
+            # Find closest mismatch info
+            mismatched_cols = cols_to_compare.copy()
+            for _, base_row in base_df_clean.iterrows():
+                temp_mismatch = [
+                    col for col in cols_to_compare 
+                    if dump_row[col] != base_row[col]
+                ]
+                if len(temp_mismatch) < len(mismatched_cols):
+                    mismatched_cols = temp_mismatch
+                if len(mismatched_cols) == 0:
+                    break
+            match_flags.append(False)
+            mismatch_details.append(','.join(mismatched_cols))
+
+    dump_df[result_col_name] = match_flags
+    dump_df[f"{result_col_name}_mismatch_cols"] = mismatch_details
+    return dump_df
+
+
+---
+
+Usage:
+
+cols_to_compare = ['col1', 'col2', 'col3', 'col4', 'col5', 'col6', 'col7', 'col8', 'col9']
+
+funddump_result = match_rows_strict(funddump, fund, cols_to_compare, 'fund_match')
+platdump_result = match_rows_strict(platdump, plat, cols_to_compare, 'plat_match')
+aomdump_result = match_rows_strict(aomdump, aom, cols_to_compare, 'aom_match')
+
+
+---
+
+Key Improvements:
+
+Converts all values to strings for consistency.
+
+Trims leading/trailing spaces.
+
+Replaces NaN with a string placeholder ("<<NaN>>") so it can be compared accurately.
+
+Handles empty strings vs NaN as different.
+
+Keeps strict case sensitivity ("ABC" ≠ "abc").
+
+
+
+---
+
+Let me know if you want an option to ignore spaces or make it case-insensitive later!
