@@ -1,0 +1,22 @@
+fig, ax = plt.subplots(figsize=(10, 6))
+bars1 = ax.bar(x - width/2, df['sla met'], width, label='SLA Met')
+bars2 = ax.bar(x + width/2, df['sla not met'], width, label='SLA Not Met')
+
+# Add labels above each bar
+for bar in bars1 + bars2:
+    height = bar.get_height()
+    ax.annotate(f'{height}',
+                xy=(bar.get_x() + bar.get_width() / 2, height),
+                xytext=(0, 3),  # offset
+                textcoords="offset points",
+                ha='center', va='bottom')
+
+ax.set_xlabel('Team Name')
+ax.set_ylabel('Task Count')
+ax.set_title('SLA Met vs SLA Not Met by Team')
+ax.set_xticks(x)
+ax.set_xticklabels(df['teamname'], rotation=45)
+ax.legend()
+plt.tight_layout()
+plt.savefig(bar_chart_path)
+plt.close()
