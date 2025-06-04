@@ -1,0 +1,32 @@
+Sub RoundDecimalAndHighlight_WholeSheet()
+    Dim srcWs As Worksheet
+    Dim newWs As Worksheet
+    Dim rng As Range, cell As Range
+    Dim val As Variant
+    Dim roundedVal As Variant
+
+    Set srcWs = ActiveSheet
+    Set rng = srcWs.UsedRange ' Only process non-blank cells
+
+    ' Create a new worksheet for output
+    Set newWs = Worksheets.Add(After:=Worksheets(Worksheets.Count))
+    newWs.Name = "Rounded_" & Format(Now, "hhmmss")
+
+    ' Loop through all cells in used range
+    For Each cell In rng
+        val = cell.Value
+        If IsNumeric(val) Then
+            If val <> Int(val) Then
+                roundedVal = Round(val, 0)
+                newWs.Cells(cell.Row, cell.Column).Value = roundedVal
+                newWs.Cells(cell.Row, cell.Column).Interior.Color = RGB(255, 255, 153) ' Light yellow
+            Else
+                newWs.Cells(cell.Row, cell.Column).Value = val
+            End If
+        Else
+            newWs.Cells(cell.Row, cell.Column).Value = val ' Copy non-numeric values
+        End If
+    Next cell
+
+    MsgBox "Rounded decimal values copied and highlighted in new sheet: '" & newWs.Name & "'", vbInformation
+End Sub
