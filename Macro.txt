@@ -1,0 +1,49 @@
+Sub RoundAndHighlight_SaveNewSheet()
+    Dim srcWs As Worksheet
+    Dim newWs As Worksheet
+    Dim lastRow As Long, lastCol As Long
+    Dim col As Long, r As Long
+    Dim colHadDecimal As Boolean
+    Dim colToHighlight As Collection
+    Dim key As Variant
+
+    Set srcWs = ActiveSheet
+    lastRow = srcWs.Cells(srcWs.Rows.Count, 1).End(xlUp).Row
+    lastCol = srcWs.Cells(1, srcWs.Columns.Count).End(xlToLeft).Column
+
+    ' Create a new worksheet
+    Set newWs = Worksheets.Add(After:=Worksheets(Worksheets.Count))
+    newWs.Name = "Rounded_" & Format(Now, "hhmmss")
+
+    Set colToHighlight = New Collection
+
+    ' Loop through each cell, round if decimal, and copy to new sheet
+    For col = 1 To lastCol
+        colHadDecimal = False
+        For r = 1 To lastRow
+            Dim cellValue As Variant
+            cellValue = srcWs.Cells(r, col).Value
+
+            If IsNumeric(cellValue) Then
+                If cellValue <> Int(cellValue) Then
+                    cellValue = Round(cellValue, 0)
+                    colHadDecimal = True
+                End If
+            End If
+            newWs.Cells(r, col).Value = cellValue
+        Next r
+        ' Track columns to highlight
+        If colHadDecimal Then
+            On Error Resume Next
+            colToHighlight.Add col, CStr(col)
+            On Error GoTo 0
+        End If
+    Next col
+
+    ' Highlight columns in new sheet
+    For Each key In colToHighlight
+        newWs.Columns(key).Interior.Color = RGB(204, 255, 204) ' Light green
+    Next key
+
+    MsgBox "Rounded values copied to '" & newWs.Name & "' and highlighted.", vbInformation
+End Sub
