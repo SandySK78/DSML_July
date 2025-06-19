@@ -1,0 +1,32 @@
+import pandas as pd
+import os
+
+# 1. Path to the folder containing all 5 Excel files
+folder_path = "path/to/your/folder"  # replace with actual path
+
+# 2. Get all Excel file names from the folder
+excel_files = [file for file in os.listdir(folder_path) if file.endswith('.xlsx')]
+
+# 3. Sheet names to consolidate
+sheet_names = ['Sheet1', 'Sheet2', 'Sheet3']
+
+# 4. Dictionary to hold dataframes for each sheet
+consolidated_data = {sheet: [] for sheet in sheet_names}
+
+# 5. Read and append data from each sheet in each file
+for file in excel_files:
+    file_path = os.path.join(folder_path, file)
+    for sheet in sheet_names:
+        df = pd.read_excel(file_path, sheet_name=sheet)
+        df['Source_File'] = file  # Optional: add filename column for traceability
+        consolidated_data[sheet].append(df)
+
+# 6. Write consolidated sheets into one Excel file
+output_path = os.path.join(folder_path, 'Consolidated_Output.xlsx')
+
+with pd.ExcelWriter(output_path, engine='openpyxl') as writer:
+    for sheet, dataframes in consolidated_data.items():
+        combined_df = pd.concat(dataframes, ignore_index=True)
+        combined_df.to_excel(writer, sheet_name=sheet, index=False)
+
+print(f"Consolidation complete! Output saved to {output_path}")
