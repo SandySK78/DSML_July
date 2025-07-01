@@ -1,0 +1,9 @@
+import win32com.client as win32
+
+def send_email(subject, body, to):
+    outlook = win32.Dispatch('outlook.application')
+    mail = outlook.CreateItem(0)
+    mail.Subject = subject
+    mail.Body = body
+    mail.To = to
+    mail.Send()

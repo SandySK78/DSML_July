@@ -1,0 +1,42 @@
+import os
+import subprocess
+import sqlite3
+from datetime import datetime
+
+DB_FILE = "status.db"
+SCRIPT_DIR = "scripts"
+
+def init_db():
+    with sqlite3.connect(DB_FILE) as conn:
+        conn.execute('''CREATE TABLE IF NOT EXISTS status (
+                            script TEXT PRIMARY KEY,
+                            last_run TEXT,
+                            status TEXT,
+                            message TEXT
+                        )''')
+
+def update_status(script, status, message):
+    with sqlite3.connect(DB_FILE) as conn:
+        conn.execute('''INSERT OR REPLACE INTO status
+                        (script, last_run, status, message)
+                        VALUES (?, ?, ?, ?)''',
+                     (script, datetime.now().strftime("%Y-%m-%d %H:%M:%S"), status, message))
+
+def get_all_status():
+    init_db()
+    with sqlite3.connect(DB_FILE) as conn:
+        rows = conn.execute("SELECT * FROM status").fetchall()
+        return rows
+
+def run_script(script):
+    path = os.path.join(SCRIPT_DIR, script)
+    try:
+        result = subprocess.run(["python", path], capture_output=True, text=True)
+        if result.returncode == 0:
+            update_status(script, "Success", result.stdout)
+        else:
+            update_status(script, "Failed", result.stderr)
+    except Exception as e:
+        update_status(script, "Error", str(e))
+
+init_db()

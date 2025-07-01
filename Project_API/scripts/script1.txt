@@ -1,0 +1,8 @@
+from mail_utils import send_email
+
+try:
+    send_email("Script 1", "Hello from script 1!", "someone@example.com")
+    print("Email sent successfully.")
+except Exception as e:
+    print("Failed to send email:", e)
+    exit(1)
