@@ -1,0 +1,144 @@
+import os
+import subprocess
+from flask import Flask, render_template_string, request, redirect, url_for
+from threading import Thread
+from time import sleep
+
+app = Flask(__name__)
+
+# Dictionary to keep track of running processes
+running_processes = {}
+
+# Configuration
+SCRIPTS_DIR = './scripts'  # Directory where your Python scripts are stored
+os.makedirs(SCRIPTS_DIR, exist_ok=True)
+
+def get_script_list():
+    """Get list of Python scripts in the scripts directory"""
+    return [f for f in os.listdir(SCRIPTS_DIR) if f.endswith('.py')]
+
+def run_script(script_name):
+    """Run a Python script and capture its output"""
+    script_path = os.path.join(SCRIPTS_DIR, script_name)
+    process = subprocess.Popen(
+        ['python', script_path],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True
+    )
+    running_processes[script_name] = process
+    
+    # Thread to capture output
+    def capture_output():
+        while True:
+            output = process.stdout.readline()
+            if output == '' and process.poll() is not None:
+                break
+            if output:
+                print(f"[{script_name}] {output.strip()}")
+        running_processes.pop(script_name, None)
+    
+    Thread(target=capture_output, daemon=True).start()
+
+@app.route('/')
+def index():
+    scripts = get_script_list()
+    script_statuses = []
+    
+    for script in scripts:
+        status = 'Running' if script in running_processes else 'Stopped'
+        script_statuses.append({
+            'name': script,
+            'status': status
+        })
+    
+    return render_template_string('''
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <title>Python Script Monitor</title>
+            <style>
+                body { font-family: Arial, sans-serif; margin: 20px; }
+                table { border-collapse: collapse; width: 100%; }
+                th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+                th { background-color: #f2f2f2; }
+                .running { color: green; }
+                .stopped { color: red; }
+                .btn { padding: 5px 10px; text-decoration: none; border-radius: 3px; }
+                .start-btn { background-color: #4CAF50; color: white; }
+                .stop-btn { background-color: #f44336; color: white; }
+            </style>
+        </head>
+        <body>
+            <h1>Python Script Monitor</h1>
+            <table>
+                <tr>
+                    <th>Script Name</th>
+                    <th>Status</th>
+                    <th>Actions</th>
+                </tr>
+                {% for script in script_statuses %}
+                <tr>
+                    <td>{{ script.name }}</td>
+                    <td class="{{ 'running' if script.status == 'Running' else 'stopped' }}">
+                        {{ script.status }}
+                    </td>
+                    <td>
+                        {% if script.status == 'Stopped' %}
+                            <a href="/start/{{ script.name }}" class="btn start-btn">Start</a>
+                        {% else %}
+                            <a href="/stop/{{ script.name }}" class="btn stop-btn">Stop</a>
+                        {% endif %}
+                        <a href="/view/{{ script.name }}" class="btn">View</a>
+                    </td>
+                </tr>
+                {% endfor %}
+            </table>
+        </body>
+        </html>
+    ''', script_statuses=script_statuses)
+
+@app.route('/start/<script_name>')
+def start_script(script_name):
+    if script_name in running_processes:
+        return redirect(url_for('index'))
+    run_script(script_name)
+    return redirect(url_for('index'))
+
+@app.route('/stop/<script_name>')
+def stop_script(script_name):
+    if script_name in running_processes:
+        running_processes[script_name].terminate()
+        running_processes.pop(script_name)
+    return redirect(url_for('index'))
+
+@app.route('/view/<script_name>')
+def view_script(script_name):
+    script_path = os.path.join(SCRIPTS_DIR, script_name)
+    if not os.path.exists(script_path):
+        return "Script not found", 404
+    
+    with open(script_path, 'r') as f:
+        content = f.read()
+    
+    return render_template_string('''
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <title>View {{ script_name }}</title>
+            <style>
+                body { font-family: Arial, sans-serif; margin: 20px; }
+                pre { background: #f4f4f4; padding: 10px; border-radius: 5px; }
+                .back-btn { display: inline-block; margin-top: 10px; padding: 5px 10px; background: #333; color: white; text-decoration: none; border-radius: 3px; }
+            </style>
+        </head>
+        <body>
+            <h1>Viewing: {{ script_name }}</h1>
+            <pre>{{ content }}</pre>
+            <a href="/" class="back-btn">Back to Dashboard</a>
+        </body>
+        </html>
+    ''', script_name=script_name, content=content)
+
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=5000, debug=True)
