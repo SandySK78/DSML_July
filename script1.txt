@@ -1,0 +1,308 @@
+import os
+import subprocess
+import pythoncom
+import win32com.client
+from flask import Flask, render_template_string, request, redirect, url_for, jsonify
+from threading import Thread, Lock
+from time import sleep
+from datetime import datetime
+import json
+import traceback
+
+app = Flask(__name__)
+
+# Configuration
+CONFIG = {
+    'SCRIPTS_DIR': './scripts',
+    'EMAIL_FROM': 'your-email@outlook.com',
+    'EMAIL_TO': 'admin@example.com',
+    'EMAIL_SUBJECT': 'Python Script Monitor Alert',
+    'CHECK_INTERVAL': 60,  # seconds between status checks
+    'ALLOWED_EXTENSIONS': ['.py', '.bat']  # Supported file types
+}
+
+# Ensure directories exist
+os.makedirs(CONFIG['SCRIPTS_DIR'], exist_ok=True)
+
+# Process management
+running_processes = {}
+process_outputs = {}
+process_errors = {}
+status_lock = Lock()
+
+def load_config():
+    """Load configuration from file if exists"""
+    if os.path.exists('config.json'):
+        with open('config.json') as f:
+            CONFIG.update(json.load(f))
+
+def save_config():
+    """Save configuration to file"""
+    with open('config.json', 'w') as f:
+        json.dump(CONFIG, f, indent=4)
+
+def get_script_list():
+    """Get list of scripts in the scripts directory"""
+    scripts = []
+    for f in os.listdir(CONFIG['SCRIPTS_DIR']):
+        if any(f.endswith(ext) for ext in CONFIG['ALLOWED_EXTENSIONS']):
+            scripts.append(f)
+    return scripts
+
+def run_script(script_name):
+    """Run a script and capture its output"""
+    with status_lock:
+        if script_name in running_processes:
+            return False
+
+        script_path = os.path.join(CONFIG['SCRIPTS_DIR'], script_name)
+        
+        # Determine command based on file extension
+        if script_name.endswith('.py'):
+            command = ['python', script_path]
+        elif script_name.endswith('.bat'):
+            command = ['cmd.exe', '/c', script_path]
+        else:
+            return False
+
+        process = subprocess.Popen(
+            command,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            creationflags=subprocess.CREATE_NEW_PROCESS_GROUP
+        )
+        
+        running_processes[script_name] = {
+            'process': process,
+            'start_time': datetime.now(),
+            'restart_count': 0
+        }
+        process_outputs[script_name] = []
+        process_errors[script_name] = []
+    
+    def capture_output():
+        while True:
+            output = process.stdout.readline()
+            error = process.stderr.readline()
+            
+            if output == '' and error == '' and process.poll() is not None:
+                break
+                
+            if output:
+                with status_lock:
+                    process_outputs[script_name].append(('output', output.strip()))
+            if error:
+                with status_lock:
+                    process_errors[script_name].append(('error', error.strip()))
+        
+        # Process ended
+        return_code = process.poll()
+        with status_lock:
+            running_processes.pop(script_name, None)
+            
+            if return_code != 0:  # Script failed
+                send_error_email(script_name, return_code)
+    
+    Thread(target=capture_output, daemon=True).start()
+    return True
+
+def send_error_email(failed_script, return_code):
+    """Send email notification about script failure using Outlook"""
+    try:
+        pythoncom.CoInitialize()
+        outlook = win32com.client.Dispatch('Outlook.Application')
+        mail = outlook.CreateItem(0)  # 0 = olMailItem
+        
+        # Get status of all scripts
+        scripts_status = []
+        for script in get_script_list():
+            status = 'Running' if script in running_processes else 'Stopped'
+            scripts_status.append(f"{script}: {status}")
+        
+        # Get error details
+        error_details = "\n".join([e[1] for e in process_errors.get(failed_script, [])][-10:])  # Last 10 errors
+        
+        mail.Subject = f"{CONFIG['EMAIL_SUBJECT']} - {failed_script} Failed (Code: {return_code})"
+        mail.Body = f"""
+Script {failed_script} failed with return code {return_code}
+
+Last Errors:
+{error_details}
+
+All Scripts Status:
+{chr(10).join(scripts_status)}
+
+Time: {datetime.now()}
+"""
+        mail.To = CONFIG['EMAIL_TO']
+        mail.Send()
+        
+    except Exception as e:
+        print(f"Failed to send email: {str(e)}")
+        traceback.print_exc()
+    finally:
+        pythoncom.CoUninitialize()
+
+def monitor_scripts():
+    """Background thread to monitor script status"""
+    while True:
+        sleep(CONFIG['CHECK_INTERVAL'])
+        with status_lock:
+            scripts = get_script_list()
+            for script in scripts:
+                if script in running_processes:
+                    process = running_processes[script]['process']
+                    if process.poll() is not None:  # Process ended
+                        print(f"Script {script} stopped unexpectedly")
+                        running_processes.pop(script)
+                        if script in process_outputs:
+                            process_outputs.pop(script)
+                        if script in process_errors:
+                            process_errors.pop(script)
+
+# Start monitoring thread
+Thread(target=monitor_scripts, daemon=True).start()
+
+@app.route('/')
+def index():
+    scripts = get_script_list()
+    script_statuses = []
+    
+    for script in scripts:
+        if script in running_processes:
+            process_info = running_processes[script]
+            status = 'Running'
+            uptime = str(datetime.now() - process_info['start_time']).split('.')[0]
+            restart_count = process_info['restart_count']
+        else:
+            status = 'Stopped'
+            uptime = 'N/A'
+            restart_count = 0
+        
+        script_statuses.append({
+            'name': script,
+            'status': status,
+            'uptime': uptime,
+            'restart_count': restart_count,
+            'last_errors': [e[1] for e in process_errors.get(script, [])][-3:],
+            'last_output': [o[1] for o in process_outputs.get(script, [])][-3:],
+            'type': 'Batch' if script.endswith('.bat') else 'Python'
+        })
+    
+    return render_template_string('''
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <title>Script Monitor (Python + Batch)</title>
+            <style>
+                body { font-family: Arial, sans-serif; margin: 20px; }
+                table { border-collapse: collapse; width: 100%; margin-bottom: 20px; }
+                th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+                th { background-color: #f2f2f2; }
+                .running { color: green; }
+                .stopped { color: red; }
+                .btn { padding: 5px 10px; text-decoration: none; border-radius: 3px; margin-right: 5px; }
+                .start-btn { background-color: #4CAF50; color: white; }
+                .stop-btn { background-color: #f44336; color: white; }
+                .config-btn { background-color: #2196F3; color: white; }
+                .log { font-family: monospace; background: #f4f4f4; padding: 5px; border-radius: 3px; }
+                .error-log { color: #d32f2f; }
+                .config-panel { background: #f9f9f9; padding: 15px; border-radius: 5px; margin-bottom: 20px; }
+                .script-type { font-weight: bold; }
+                .python-type { color: #3776ab; }
+                .batch-type { color: #4d4d4d; }
+            </style>
+            <script>
+                function refreshStatus() {
+                    fetch('/status')
+                        .then(response => response.json())
+                        .then(data => {
+                            console.log('Status updated', data);
+                            location.reload();
+                        });
+                }
+                setInterval(refreshStatus, 30000);
+            </script>
+        </head>
+        <body>
+            <h1>Script Monitor (Python + Batch)</h1>
+            
+            <div class="config-panel">
+                <h2>Configuration</h2>
+                <form method="post" action="/update_config">
+                    <div>
+                        <label for="email_from">Outlook Email From:</label>
+                        <input type="text" id="email_from" name="email_from" value="{{ config.EMAIL_FROM }}">
+                    </div>
+                    <div>
+                        <label for="email_to">Email To:</label>
+                        <input type="text" id="email_to" name="email_to" value="{{ config.EMAIL_TO }}">
+                    </div>
+                    <div>
+                        <label for="check_interval">Check Interval (sec):</label>
+                        <input type="number" id="check_interval" name="check_interval" value="{{ config.CHECK_INTERVAL }}">
+                    </div>
+                    <button type="submit" class="btn config-btn">Save Configuration</button>
+                </form>
+            </div>
+            
+            <table>
+                <tr>
+                    <th>Script Name</th>
+                    <th>Type</th>
+                    <th>Status</th>
+                    <th>Uptime</th>
+                    <th>Restarts</th>
+                    <th>Last Output</th>
+                    <th>Last Errors</th>
+                    <th>Actions</th>
+                </tr>
+                {% for script in script_statuses %}
+                <tr>
+                    <td>{{ script.name }}</td>
+                    <td class="script-type {{ 'python-type' if script.type == 'Python' else 'batch-type' }}">
+                        {{ script.type }}
+                    </td>
+                    <td class="{{ 'running' if script.status == 'Running' else 'stopped' }}">
+                        {{ script.status }}
+                    </td>
+                    <td>{{ script.uptime }}</td>
+                    <td>{{ script.restart_count }}</td>
+                    <td class="log">
+                        {% for output in script.last_output %}
+                            <div>{{ output }}</div>
+                        {% endfor %}
+                    </td>
+                    <td class="log error-log">
+                        {% for error in script.last_errors %}
+                            <div>{{ error }}</div>
+                        {% endfor %}
+                    </td>
+                    <td>
+                        {% if script.status == 'Stopped' %}
+                            <a href="/start/{{ script.name }}" class="btn start-btn">Start</a>
+                        {% else %}
+                            <a href="/stop/{{ script.name }}" class="btn stop-btn">Stop</a>
+                        {% endif %}
+                        <a href="/view/{{ script.name }}" class="btn">View</a>
+                        <a href="/logs/{{ script.name }}" class="btn">Logs</a>
+                    </td>
+                </tr>
+                {% endfor %}
+            </table>
+            
+            <div>
+                <button onclick="refreshStatus()" class="btn">Refresh Status</button>
+                <a href="/restart_all" class="btn">Restart All</a>
+                <a href="/stop_all" class="btn stop-btn">Stop All</a>
+            </div>
+        </body>
+        </html>
+    ''', script_statuses=script_statuses, config=CONFIG)
+
+# ... (keep all the existing route handlers from the previous solution)
+
+if __name__ == '__main__':
+    load_config()
+    app.run(host='0.0.0.0', port=5000, debug=True)
