@@ -1,0 +1,105 @@
+import pandas as pd
+
+# === 1. Read Input Files ===
+
+party_old = pd.read_csv(r'C:\...\EAP_PARTY_20250707.csv', encoding='ISO-8859-1', sep=',', dtype=str)
+ubo_old = pd.read_csv(r'C:\...\EAP_UBO_20250707.csv', encoding='ISO-8859-1', sep=',', dtype=str)
+
+party_new = pd.read_csv(r'C:\...\EAP_PARTY_20250714.csv', encoding='ISO-8859-1', sep=',', dtype=str)
+ubo_new = pd.read_csv(r'C:\...\EAP_UBO_20250714.csv', encoding='ISO-8859-1', sep=',', dtype=str)
+
+subset_list = pd.read_excel(r'C:\...\20230311_Liste_GFK_19_June.xlsx', sheet_name='final.4040+...', skiprows=1, dtype=str)
+pgk_mapping = pd.read_excel(r'C:\...\Jul-2025_PGK_script_results.xlsx', dtype=str)
+elf_mapping = pd.read_excel(r'C:\...\ELF\Mapping.xlsx', dtype=str)
+aima = pd.read_csv(r'C:\...\upload\local-inr_20250702012.csv', encoding='ISO-8859-1', sep=',', dtype=str)
+aima['file.id'] = aima['file.id'].astype(str)
+
+# === 2. Subset by CRDS IDs ===
+
+subset_ids = subset_list['CRDS IDs - Final'].dropna().unique()
+
+party_old_subset = party_old[party_old['PARTY_ID'].isin(subset_ids)]
+ubo_old_subset = ubo_old[ubo_old['PARTY_ID'].isin(subset_ids)]
+party_new_subset = party_new[party_new['PARTY_ID'].isin(subset_ids)]
+ubo_new_subset = ubo_new[ubo_new['PARTY_ID'].isin(subset_ids)]
+
+# === 3. Subset PGK Mapping IDs ===
+
+selected_ids = pgk_mapping['crds_rhpid_selected'].dropna().unique()
+
+pgk_party_old_subset = party_old[party_old['PARTY_ID'].isin(selected_ids)]
+pgk_party_new_subset = party_new[party_new['PARTY_ID'].isin(selected_ids)]
+pgk_ubo_old_subset = ubo_old[ubo_old['PARTY_ID'].isin(selected_ids)]
+pgk_ubo_new_subset = ubo_new[ubo_new['PARTY_ID'].isin(selected_ids)]
+
+# === 4. Comparison Function ===
+
+def compare_dataframes(old_df, new_df, id_col):
+    comparison = old_df.merge(new_df, on=id_col, suffixes=('_old', '_new'), how='inner')
+    changes = []
+
+    for col in old_df.columns:
+        if col != id_col and f"{col}_new" in comparison.columns:
+            diff_mask = comparison[f"{col}_old"] != comparison[f"{col}_new"]
+            diff_rows = comparison[diff_mask][[id_col, f"{col}_old", f"{col}_new"]].copy()
+            diff_rows.columns = [id_col, 'old_value', 'new_value']
+            diff_rows['column'] = col
+            changes.append(diff_rows)
+
+    if changes:
+        return pd.concat(changes, ignore_index=True)
+    else:
+        return pd.DataFrame(columns=[id_col, 'old_value', 'new_value', 'column'])
+
+# === 5. Compare All Datasets ===
+
+party_compare = compare_dataframes(party_old_subset, party_new_subset, 'PARTY_ID')
+ubo_compare = compare_dataframes(ubo_old_subset, ubo_new_subset, 'PARTY_ID')
+pgk_party_compare = compare_dataframes(pgk_party_old_subset, pgk_party_new_subset, 'PARTY_ID')
+pgk_ubo_compare = compare_dataframes(pgk_ubo_old_subset, pgk_ubo_new_subset, 'PARTY_ID')
+
+# === 6. Format Change Output ===
+
+def combine_changes(df, change_type):
+    if df.empty:
+        return pd.DataFrame(columns=['PARTY_ID', 'change', 'chg_type'])
+    df['change'] = df.apply(lambda row: f"{row['column']}: {row['old_value']} → {row['new_value']}", axis=1)
+    df['chg_type'] = change_type
+    return df[['PARTY_ID', 'change', 'chg_type']]
+
+party_compare_df = combine_changes(party_compare, 'party')
+ubo_compare_df = combine_changes(ubo_compare, 'ubo')
+pgk_party_compare_df = combine_changes(pgk_party_compare, 'pgk_party')
+pgk_ubo_compare_df = combine_changes(pgk_ubo_compare, 'pgk_ubo')
+
+# === 7. Create Final Tables ===
+
+# pgk_party_final
+pgk_party_final = pgk_party_compare_df.copy()
+pgk_party_final['PARTY_ID'] = pgk_party_final['PARTY_ID'].astype(str)
+pgk_party_final = pgk_party_final.merge(pgk_mapping[['crds_rhpid_selected']], left_on='PARTY_ID', right_on='crds_rhpid_selected', how='left')
+pgk_party_final = pgk_party_final.merge(aima[['file.id']], left_on='PARTY_ID', right_on='file.id', how='left')
+
+# pgk_ubo_final
+pgk_ubo_final = pgk_ubo_compare_df.copy()
+pgk_ubo_final['PARTY_ID'] = pgk_ubo_final['PARTY_ID'].astype(str)
+pgk_ubo_final = pgk_ubo_final.merge(pgk_mapping[['crds_rhpid_selected']], left_on='PARTY_ID', right_on='crds_rhpid_selected', how='left')
+pgk_ubo_final = pgk_ubo_final.merge(aima[['file.id']], left_on='PARTY_ID', right_on='file.id', how='left')
+
+# Optional: fill missing values
+pgk_party_final = pgk_party_final.fillna('')
+pgk_ubo_final = pgk_ubo_final.fillna('')
+
+# === 8. Export to Excel ===
+
+pgk_party_final.to_excel(
+    r'C:\Users\kumasa36\OneDrive\Deutsche Bank AG\Desktop\GCD\PGK\2024.01.06\Pasadena_final_party.xlsx',
+    index=False
+)
+
+pgk_ubo_final.to_excel(
+    r'C:\Users\kumasa36\OneDrive\Deutsche Bank AG\Desktop\GCD\PGK\2024.01.06\Pasadena_final_ubo.xlsx',
+    index=False
+)
+
+print("✅ Export complete: pgk_party_final.xlsx and pgk_ubo_final.xlsx")
