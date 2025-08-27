@@ -1,0 +1,168 @@
+import pandas as pd
+from openpyxl import load_workbook
+
+# ========================
+# File paths
+# ========================
+weekly_file = "weekly_file.xlsx"
+onboarding_file = "onboarding.xlsx"
+rms_file = "rms.xlsx"
+imr_file = "imr.xlsx"
+fillfica_file = "fillfica.xlsx"
+ficadata_file = "ficadata.xlsx"
+
+# ========================
+# Load workbook
+# ========================
+wb = load_workbook(weekly_file)
+
+# ================================================================
+# 1. ONB SHEET (Clear B–U, Insert Input, Sort)
+# ================================================================
+ws_onb = wb["onb"]
+
+# Clear B–U
+for row in range(2, ws_onb.max_row + 1):
+    for col in range(2, 22):  # B=2 … U=21
+        ws_onb.cell(row=row, column=col).value = None
+
+# Load input
+onb_df = pd.read_excel(onboarding_file, sheet_name="onb")
+
+# Write raw data
+for r_idx, row in enumerate(onb_df.itertuples(index=False), start=2):
+    for c_idx, value in enumerate(row, start=2):
+        ws_onb.cell(row=r_idx, column=c_idx).value = value
+
+# Re-read + sort
+data = list(ws_onb.values)
+cols = data[0]
+rows = data[1:]
+df_onb = pd.DataFrame(rows, columns=cols).dropna(how="all")
+
+df_onb = df_onb.sort_values(
+    by=["sysname", "accoid", "resolvetime"],
+    ascending=[False, True, False]
+)
+
+# Rewrite sorted
+for r_idx, row in enumerate(df_onb.itertuples(index=False), start=2):
+    for c_idx, value in enumerate(row, start=1):
+        ws_onb.cell(row=r_idx, column=c_idx).value = value
+
+# ================================================================
+# 2. RMS_data SHEET (Append non-matching processid)
+# ================================================================
+ws_rms = wb["RMS_data"]
+
+data = list(ws_rms.values)
+cols = data[0]
+rows = data[1:]
+main_rms_df = pd.DataFrame(rows, columns=cols).dropna(how="all")
+
+rms_df = pd.read_excel(rms_file)
+merged = rms_df[~rms_df["processid"].isin(main_rms_df["processid"])]
+final_rms = pd.concat([main_rms_df, merged], ignore_index=True)
+
+# Clear + write
+for row in ws_rms.iter_rows(min_row=2, max_row=ws_rms.max_row):
+    for cell in row:
+        cell.value = None
+
+for r_idx, row in enumerate(final_rms.itertuples(index=False), start=2):
+    for c_idx, value in enumerate(row, start=1):
+        ws_rms.cell(row=r_idx, column=c_idx).value = value
+
+# ================================================================
+# 3. IM_rel SHEET (Replace all with input)
+# ================================================================
+ws_imr = wb["IM_rel"]
+imr_df = pd.read_excel(imr_file)
+
+# Clear + write
+for row in ws_imr.iter_rows(min_row=2, max_row=ws_imr.max_row):
+    for cell in row:
+        cell.value = None
+
+for r_idx, row in enumerate(imr_df.itertuples(index=False), start=2):
+    for c_idx, value in enumerate(row, start=1):
+        ws_imr.cell(row=r_idx, column=c_idx).value = value
+
+# ================================================================
+# 4. FILL SHEET (Replace all, format dates, then sort inside sheet)
+# ================================================================
+ws_fill = wb["FILL"]
+fill_df = pd.read_excel(fillfica_file)
+
+# Format date columns
+for col in ["startdate", "enddate"]:
+    if col in fill_df.columns:
+        fill_df[col] = pd.to_datetime(fill_df[col]).dt.strftime("%m-%d-%Y %H:%M")
+
+# Clear + write raw first
+for row in ws_fill.iter_rows(min_row=2, max_row=ws_fill.max_row):
+    for cell in row:
+        cell.value = None
+
+for r_idx, row in enumerate(fill_df.itertuples(index=False), start=2):
+    for c_idx, value in enumerate(row, start=1):
+        ws_fill.cell(row=r_idx, column=c_idx).value = value
+
+# Now read back + sort
+data = list(ws_fill.values)
+cols = data[0]
+rows = data[1:]
+df_fill = pd.DataFrame(rows, columns=cols).dropna(how="all")
+df_fill = df_fill.sort_values(by=["id", "startdate"], ascending=[True, True])
+
+# Rewrite sorted
+for r_idx, row in enumerate(df_fill.itertuples(index=False), start=2):
+    for c_idx, value in enumerate(row, start=1):
+        ws_fill.cell(row=r_idx, column=c_idx).value = value
+
+# ================================================================
+# 5. FIC SHEET (Clean input, remove matches, append at D–W, copy W–AB)
+# ================================================================
+ws_fic = wb["FIC"]
+
+# Read main FIC
+data = list(ws_fic.values)
+cols = data[0]
+rows = data[1:]
+fic_df_main = pd.DataFrame(rows, columns=cols).dropna(how="all")
+
+# Read input
+fic_df_input = pd.read_excel(ficadata_file)
+
+# Filter rows
+fic_df_input = fic_df_input[
+    fic_df_input["D_LE"].isin(["[dead inc]", "[thug liefe NY_Branc]"])
+]
+
+# Format date columns
+for col in ["startdate", "enddate"]:
+    if col in fic_df_input.columns:
+        fic_df_input[col] = pd.to_datetime(fic_df_input[col]).dt.strftime("%m-%d-%Y %H:%M")
+
+# Move Sales column to last
+if "Sales" in fic_df_input.columns:
+    sales = fic_df_input.pop("Sales")
+    fic_df_input["Sales"] = sales
+
+# Exclude matches
+fic_df_input = fic_df_input[~fic_df_input["requestid"].isin(fic_df_main["processid"])]
+
+# Append input rows into main sheet (D–W)
+start_row = ws_fic.max_row + 1
+for r_idx, row in enumerate(fic_df_input.itertuples(index=False), start=start_row):
+    for c_idx, value in enumerate(row, start=4):  # D=4
+        ws_fic.cell(row=r_idx, column=c_idx).value = value
+    # Copy W–AB values from last row of main data
+    for c_idx in range(23, 29):  # W=23 … AB=28
+        ws_fic.cell(row=r_idx, column=c_idx).value = ws_fic.cell(start_row-1, column=c_idx).value
+
+# ================================================================
+# Finalize
+# ================================================================
+wb.calc_properties.fullCalcOnLoad = True
+wb.save(weekly_file)
