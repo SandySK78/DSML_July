@@ -1,0 +1,153 @@
+import pandas as pd
+from openpyxl import load_workbook
+
+# ========================
+# File paths
+# ========================
+weekly_file = "weekly_file.xlsx"
+onboarding_file = "onboarding.xlsx"
+rms_file = "rms.xlsx"
+imr_file = "imr.xlsx"
+fillfica_file = "fillfica.xlsx"
+ficadata_file = "ficadata.xlsx"
+
+# ========================
+# Load main workbook
+# ========================
+wb = load_workbook(weekly_file)
+
+# ================================================================
+# 1. ONB SHEET
+# ================================================================
+ws_onb = wb["onb"]
+
+# Clear B–U
+for row in range(2, ws_onb.max_row + 1):
+    for col in range(2, 22):  # B=2 … U=21
+        ws_onb.cell(row=row, column=col).value = None
+
+# Load new onboarding data
+onb_df = pd.read_excel(onboarding_file, sheet_name="onb")
+
+# Sort
+onb_df = onb_df.sort_values(
+    by=["sysname", "accoid", "resolvetime"],
+    ascending=[False, True, False]
+)
+
+# Write back (from col B)
+for r_idx, row in enumerate(onb_df.itertuples(index=False), start=2):
+    for c_idx, value in enumerate(row, start=2):
+        ws_onb.cell(row=r_idx, column=c_idx).value = value
+
+# ================================================================
+# 2. RMS_data SHEET
+# ================================================================
+ws_rms = wb["RMS_data"]
+main_rms_df = pd.read_excel(weekly_file, sheet_name="RMS_data")
+rms_df = pd.read_excel(rms_file)
+
+# Exclude matching processid
+merged = rms_df[~rms_df["processid"].isin(main_rms_df["processid"])]
+
+# Append new rows to main RMS_data
+final_rms = pd.concat([main_rms_df, merged], ignore_index=True)
+
+# Clear sheet
+for row in ws_rms.iter_rows(min_row=2, max_row=ws_rms.max_row):
+    for cell in row:
+        cell.value = None
+
+# Write new values
+for r_idx, row in enumerate(final_rms.itertuples(index=False), start=2):
+    for c_idx, value in enumerate(row, start=1):
+        ws_rms.cell(row=r_idx, column=c_idx).value = value
+
+# ================================================================
+# 3. IM_rel SHEET
+# ================================================================
+ws_imr = wb["IM_rel"]
+
+imr_df = pd.read_excel(imr_file)
+
+# Clear all data
+for row in ws_imr.iter_rows(min_row=2, max_row=ws_imr.max_row):
+    for cell in row:
+        cell.value = None
+
+# Write new IMR data
+for r_idx, row in enumerate(imr_df.itertuples(index=False), start=2):
+    for c_idx, value in enumerate(row, start=1):
+        ws_imr.cell(row=r_idx, column=c_idx).value = value
+
+# ================================================================
+# 4. FILL SHEET
+# ================================================================
+ws_fill = wb["FILL"]
+
+fill_df = pd.read_excel(fillfica_file)
+
+# Convert date format
+for col in ["startdate", "enddate"]:
+    if col in fill_df.columns:
+        fill_df[col] = pd.to_datetime(fill_df[col]).dt.strftime("%m-%d-%Y %H:%M")
+
+# Sort
+fill_df = fill_df.sort_values(by=["id", "startdate"], ascending=[True, True])
+
+# Clear sheet
+for row in ws_fill.iter_rows(min_row=2, max_row=ws_fill.max_row):
+    for cell in row:
+        cell.value = None
+
+# Write new data
+for r_idx, row in enumerate(fill_df.itertuples(index=False), start=2):
+    for c_idx, value in enumerate(row, start=1):
+        ws_fill.cell(row=r_idx, column=c_idx).value = value
+
+# ================================================================
+# 5. FIC SHEET
+# ================================================================
+ws_fic = wb["FIC"]
+fic_df_main = pd.read_excel(weekly_file, sheet_name="FIC")
+fic_df_input = pd.read_excel(ficadata_file)
+
+# Filter D_LE
+fic_df_input = fic_df_input[
+    fic_df_input["D_LE"].isin(["[dead inc]", "[thug liefe NY_Branc]"])
+]
+
+# Date format
+for col in ["startdate", "enddate"]:
+    if col in fic_df_input.columns:
+        fic_df_input[col] = pd.to_datetime(fic_df_input[col]).dt.strftime("%m-%d-%Y %H:%M")
+
+# Move sales to last column
+if "sales" in fic_df_input.columns:
+    sales_col = fic_df_input.pop("sales")
+    fic_df_input["sales"] = sales_col
+
+# Match process id → requestid
+fic_df_final = pd.concat([
+    fic_df_main[~fic_df_main["processid"].isin(fic_df_input["requestid"])],
+    fic_df_input.rename(columns={"requestid": "processid"})  # align column
+], ignore_index=True)
+
+# Clear FIC sheet
+for row in ws_fic.iter_rows(min_row=2, max_row=ws_fic.max_row):
+    for cell in row:
+        cell.value = None
+
+# Write updated values from col D–W
+for r_idx, row in enumerate(fic_df_final.itertuples(index=False), start=2):
+    for c_idx, value in enumerate(row, start=4):  # col D = 4
+        ws_fic.cell(row=r_idx, column=c_idx).value = value
+
+# ================================================================
+# Finalize
+# ================================================================
+# Force Excel recalc on open
+wb.calc_properties.fullCalcOnLoad = True
+
+# Save
+wb.save(weekly_file)
